@@ -48,12 +48,16 @@ pacer::pacer(uint64_t frame_duration) :
         frame_times_compute(frame_times),
         worker([this](std::stop_token t) {
 	        std::vector<XrDuration> samples;
-	        while (not t.stop_requested())
+	        while (true)
 	        {
 		        samples.clear();
 		        {
 			        std::unique_lock lock(compute_mutex);
-			        compute_cv.wait(lock);
+			        // Returns false when the stop token is signalled, including if
+			        // the stop was requested before we got here.
+			        if (not compute_cv.wait(lock, t, [this] { return compute_pending; }))
+				        return;
+			        compute_pending = false;
 			        for (const auto & time: frame_times_compute)
 			        {
 				        if (time.decoded > time.present)
@@ -150,6 +154,7 @@ void pacer::on_feedback(const wivrn::from_headset::feedback & feedback, const cl
 		{
 			std::unique_lock lock(compute_mutex);
 			std::swap(frame_times, frame_times_compute);
+			compute_pending = true;
 			compute_cv.notify_all();
 		}
 		// adjust phase

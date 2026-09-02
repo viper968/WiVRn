@@ -40,9 +40,14 @@ class pacer
 public:
 	struct frame_info
 	{
-		int64_t frame_id;
-		int64_t present_ns;
-		int64_t predicted_display_time;
+		// Zero initialised: in_flight_frames is read by on_feedback and
+		// present_to_info before all 8 slots have been filled by predict(),
+		// which would otherwise compare against indeterminate values.
+		// A real present time is never 0, so an untouched slot cannot be
+		// mistaken for a live frame.
+		int64_t frame_id = 0;
+		int64_t present_ns = 0;
+		int64_t predicted_display_time = 0;
 	};
 
 private:
@@ -68,7 +73,12 @@ private:
 	std::vector<frame_time> frame_times;
 
 	std::mutex compute_mutex;
-	std::condition_variable compute_cv;
+	// condition_variable_any, so the worker can wait on the jthread's stop token.
+	// A plain condition_variable cannot observe it: a stop requested between the
+	// loop's stop check and the wait would be missed and the join would hang.
+	std::condition_variable_any compute_cv;
+	// Guarded by compute_mutex. Also suppresses recomputing on a spurious wakeup.
+	bool compute_pending = false;
 	std::vector<frame_time> frame_times_compute;
 	std::jthread worker;
 
