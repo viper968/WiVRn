@@ -10,8 +10,8 @@ Baseline: **`SendData` mean 0.194 ms**, n=46,146 (nvenc h265, ~50 Mbit/s, 90 Hz,
 | 0 | Baseline capture | `92cc79d2` | SendData 0.194 ms, n=46,146 |
 | 1 | E5 pacer lost wakeup + uninit `in_flight_frames` | `23c69eaa` | correctness; race reproduced and fixed |
 | 2 | E2 AES key schedule per datagram | `5a44c202` | **~9 ns/datagram — negligible** |
-| 3 | E6 DSCP never applied | `8c725dc0` | now applied; wire check outstanding |
-| 4 | E1 batch shard sends | `f9a9314a` | **24× fewer syscalls, ~0.08% of a core** |
+| 3 | E6 DSCP never applied | `8c725dc0` | **confirmed on the wire: `tos 0xb8`** |
+| 4 | E1 batch shard sends | `f9a9314a` + `0d6c6e0a` | **SendData −6% at matched load** |
 | 5 | E3/E4 client-side | not started | bounded at 3.69% client CPU, unattributed |
 
 ## Corrections to the original review
@@ -23,20 +23,21 @@ The review was written without the ability to build or measure. Three claims did
 - **E6's "wrong sockopt level" was wrong.** Linux accepts `IP_TOS` on an `AF_INET6` socket and
   applies it to v4-mapped traffic, which is what WiVRn actually uses. The real defect was only
   that `set_tos` had no callers. Now sets `IPV6_TCLASS` too, for native v6.
-- **E1 was overstated.** The 24× syscall reduction is real, but it is worth ~0.08% of one core,
-  not the "largest single reduction in work" claimed. The kernel's per-packet UDP path dominates
-  and `sendmmsg` still pays it.
+- **E1 was overstated, then partly vindicated.** The 24× syscall reduction is real but worth
+  only ~0.08% of a core on its own. The first implementation was actually a **3% regression**,
+  because clearing the batch vectors destroyed the packets and made every shard reallocate.
+  With the packets reused (`0d6c6e0a`) it is **−6% on SendData** at matched load — a real win,
+  but from fixing allocator churn, not from the syscall saving the review predicted.
 
 ## Outstanding
 
-- **E6 wire check** needs root, which was not available:
-  `sudo tcpdump -v -i enp44s0 udp port 9757 | grep -i 'tos\|class'` — expect `0xb8`.
-  Only shows a benefit on a congested network.
-- **E1 end-to-end effect** unmeasured. Needs a session reproducing `traces/BASELINE.md`
-  conditions (~50 Mbit/s), which requires the headset worn and moving. Validation sessions
-  only reached ~12 Mbit/s, where `SendData` mean is not comparable to the baseline.
 - **E3/E4** need a source-built client for symbols; the nightly APK ships a stripped
-  `libwivrn.so`.
+  `libwivrn.so`. Bounded at 3.69% of client CPU regardless.
+- **Whether E6 helps** still needs a congested network to show up; the marking is confirmed
+  present but an idle link shows no difference, which is the correct result.
+- `encode` and `encoder_work iter` read +3% against the baseline in every post-change run
+  alike, including the one where `SendData` improved. That offset tracks the session
+  (52 vs 51 Mbit/s), not any of these commits — worth re-checking if it ever grows.
 
 ## Bug found along the way (not from this work)
 
