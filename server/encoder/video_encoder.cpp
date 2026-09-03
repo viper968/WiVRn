@@ -320,24 +320,30 @@ void video_encoder::SendData(std::span<uint8_t> data, bool end_of_frame, bool co
 	// of which outlive the flush, so they can be accumulated before sending.
 	// Bounded so a burst stays well inside the socket send buffer.
 	static constexpr size_t max_batch = 32;
-	shard_batch.clear();
-	shard_batch.reserve(max_batch);
-	batch_shards.clear();
-	batch_shards.reserve(max_batch);
+	// Grown once and then kept: the packets must survive between calls so their
+	// buffers stay allocated. serialize() clears each packet it writes, which
+	// keeps its capacity, so a steady stream reuses the same allocations. Do not
+	// clear() these vectors -- that destroys the packets and makes every shard
+	// reallocate, which costs more than the syscalls the batching saves.
+	if (shard_batch.size() < max_batch)
+	{
+		shard_batch.resize(max_batch);
+		batch_shards.resize(max_batch);
+	}
+	size_t batched = 0;
 
 	auto flush = [&] {
-		if (shard_batch.empty())
+		if (batched == 0)
 			return;
 		try
 		{
-			cnx->send_stream(std::span(shard_batch));
+			cnx->send_stream(std::span(shard_batch.data(), batched));
 		}
 		catch (...)
 		{
 			// Ignore network errors
 		}
-		shard_batch.clear();
-		batch_shards.clear();
+		batched = 0;
 	};
 
 	auto begin = data.begin();
@@ -369,10 +375,9 @@ void video_encoder::SendData(std::span<uint8_t> data, bool end_of_frame, bool co
 		{
 			// Serialize from a copy that outlives the flush: the packet keeps
 			// spans into it, and encryption writes back through them.
-			auto & queued = batch_shards.emplace_back(shard);
-			auto & packet = shard_batch.emplace_back();
-			wivrn_connection::stream_socket_t::serialize(packet, queued);
-			if (shard_batch.size() >= max_batch)
+			batch_shards[batched] = shard;
+			wivrn_connection::stream_socket_t::serialize(shard_batch[batched], batch_shards[batched]);
+			if (++batched >= max_batch)
 				flush();
 		}
 		++shard.shard_idx;
