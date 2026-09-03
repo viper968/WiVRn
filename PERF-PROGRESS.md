@@ -38,11 +38,18 @@ The review was written without the ability to build or measure. Three claims did
 - **E3/E4** need a source-built client for symbols; the nightly APK ships a stripped
   `libwivrn.so`.
 
-## Pre-existing bugs found along the way (not from this work)
+## Bug found along the way (not from this work)
 
-- `wivrn-server` **segfaults** when per-connection setup fails, e.g. when the port is already
-  bound: it logs `Client connection failed: Address already in use` and then dies on SIGSEGV
-  instead of reporting the error and carrying on. Reproduced twice.
+- `wivrn-server` **segfaults** when per-connection setup fails: it logs
+  `Client connection failed: Address already in use` and then dies on SIGSEGV instead of
+  reporting the error and carrying on. Reproduced twice. Worth reporting upstream — a bind
+  failure should not be fatal.
+
+  The port conflict that triggered it was self-inflicted, though: `pkill -f
+  ".../wivrn-server"` also matches the wrapper shell whose command line contains that path,
+  including the shell running `pkill`, which then dies mid-cleanup and leaves the server
+  alive. Use `pkill -x wivrn-server`. Likewise `pgrep -a wivrn wayvr` takes only one pattern
+  and silently errors, so it reports "nothing running" regardless.
 
 ## Rules
 
