@@ -49,8 +49,15 @@ public:
 	};
 
 private:
-	typed_socket<TCP, from_headset::packets, to_headset::packets> control;
-	typed_socket<UDP, from_headset::packets, to_headset::packets> stream;
+public:
+	// Exposed so callers that send many packets at once can serialize into their
+	// own serialization_packet buffers and hand the whole batch to send_stream.
+	using stream_socket_t = typed_socket<UDP, from_headset::packets, to_headset::packets>;
+	using control_socket_t = typed_socket<TCP, from_headset::packets, to_headset::packets>;
+
+private:
+	control_socket_t control;
+	stream_socket_t stream;
 	std::atomic<bool> active = false;
 	std::string pin;
 	encryption_state state;

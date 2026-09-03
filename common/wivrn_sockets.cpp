@@ -470,9 +470,19 @@ size_t wivrn::UDP::send_many_raw(std::span<serialization_packet> packets)
 		j += mmsgs[i].msg_hdr.msg_iovlen;
 	}
 
-	// sendmmsg may not send all messages, just consider them as lost for UDP
-	if (sendmmsg(fd, mmsgs.data(), mmsgs.size(), 0) < 0)
-		throw std::system_error{errno, std::generic_category()};
+	// sendmmsg can accept fewer messages than it was offered. Send the remainder
+	// rather than dropping it: this replaces a sequence of blocking writev calls,
+	// and a dropped video shard is not a cheap loss -- it fails the whole frame
+	// and forces an IDR, which costs far more than blocking here does.
+	for (size_t offset = 0; offset < mmsgs.size();)
+	{
+		int n = sendmmsg(fd, mmsgs.data() + offset, mmsgs.size() - offset, 0);
+		if (n < 0)
+			throw std::system_error{errno, std::generic_category()};
+		if (n == 0)
+			break; // should not happen on a blocking socket; do not spin
+		offset += n;
+	}
 	return sent;
 }
 

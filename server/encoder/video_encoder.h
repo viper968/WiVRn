@@ -22,6 +22,7 @@
 #include "driver/clock_offset.h"
 #include "idr_handler.h"
 #include "wivrn_packets.h"
+#include "wivrn_serialization.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -31,6 +32,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 #include <vulkan/vulkan_raii.hpp>
 
 namespace wivrn
@@ -101,6 +103,20 @@ private:
 
 	// shard to send
 	to_headset::video_stream_data_shard shard;
+
+	// Shards awaiting a batched send, and the headers they were serialized from.
+	//
+	// serialization_packet stores trivial field groups larger than span_min_size
+	// as spans into the *source* object rather than copying them, and the send
+	// path encrypts through those spans in place. So each queued packet needs its
+	// own header that stays put and stays untouched until the batch is flushed --
+	// which is what the temporary `video_stream_data_shard{shard}` used to give
+	// the one-shard-per-send version for free. Both are reserved to max_batch so
+	// they never reallocate mid-batch and invalidate a span.
+	//
+	// Reused across SendData calls; only valid while `mutex` is held.
+	std::vector<to_headset::video_stream_data_shard> batch_shards;
+	std::vector<serialization_packet> shard_batch;
 
 	to_headset::video_stream_data_shard::timing_info_t timing_info;
 	clock_offset clock;

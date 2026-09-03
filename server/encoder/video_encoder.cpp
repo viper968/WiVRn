@@ -315,6 +315,31 @@ void video_encoder::SendData(std::span<uint8_t> data, bool end_of_frame, bool co
 
 	ssize_t max_payload_size = (cnx->has_stream() and not control) ? to_headset::video_stream_data_shard::max_payload_size : std::numeric_limits<uint32_t>::max();
 
+	// Shards of one NAL go out in batches through sendmmsg rather than one
+	// writev each. The packets only reference `data` and the shard header, both
+	// of which outlive the flush, so they can be accumulated before sending.
+	// Bounded so a burst stays well inside the socket send buffer.
+	static constexpr size_t max_batch = 32;
+	shard_batch.clear();
+	shard_batch.reserve(max_batch);
+	batch_shards.clear();
+	batch_shards.reserve(max_batch);
+
+	auto flush = [&] {
+		if (shard_batch.empty())
+			return;
+		try
+		{
+			cnx->send_stream(std::span(shard_batch));
+		}
+		catch (...)
+		{
+			// Ignore network errors
+		}
+		shard_batch.clear();
+		batch_shards.clear();
+	};
+
 	auto begin = data.begin();
 	auto end = data.end();
 	while (begin != end)
@@ -327,21 +352,34 @@ void video_encoder::SendData(std::span<uint8_t> data, bool end_of_frame, bool co
 				shard.timing_info = timing_info;
 		}
 		shard.payload = {begin, next};
-		try
+		if (control)
 		{
-			if (control)
+			// Control goes over TCP with no payload limit, so this is a single
+			// packet; batching would buy nothing.
+			try
+			{
 				cnx->send_control(to_headset::video_stream_data_shard{shard});
-			else
-				cnx->send_stream(to_headset::video_stream_data_shard{shard});
+			}
+			catch (...)
+			{
+				// Ignore network errors
+			}
 		}
-		catch (...)
+		else
 		{
-			// Ignore network errors
+			// Serialize from a copy that outlives the flush: the packet keeps
+			// spans into it, and encryption writes back through them.
+			auto & queued = batch_shards.emplace_back(shard);
+			auto & packet = shard_batch.emplace_back();
+			wivrn_connection::stream_socket_t::serialize(packet, queued);
+			if (shard_batch.size() >= max_batch)
+				flush();
 		}
 		++shard.shard_idx;
 		shard.view_info.reset();
 		begin = next;
 	}
+	flush();
 	if (end_of_frame)
 		wivrn::trace::cpu_end(wivrn::trace::cpu_track::network, stream_idx, shard.frame_idx, "SendData");
 }
