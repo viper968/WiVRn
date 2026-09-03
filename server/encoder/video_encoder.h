@@ -147,6 +147,12 @@ public:
 	void on_feedback(const from_headset::feedback &);
 	void reset();
 
+	// Times a lost frame forced a keyframe on this stream, cumulative.
+	uint64_t idr_recoveries() const
+	{
+		return idr->recoveries();
+	}
+
 	// bitrate_bps is the bitrate for the whole stream
 	// the encoder bitrate will be scaled accordingly
 	void set_bitrate(uint32_t bitrate_bps);

@@ -75,6 +75,33 @@ private:
 		void add(float us);
 	};
 
+	// How often frames fail to reach the headset's decoder, derived from the
+	// per-frame feedback the headset already sends. This is the number that
+	// separates "my link is dropping packets" from "my encoder is slow" -- until
+	// now nothing counted it, and the only trace of a loss was a log line.
+	struct link_stats
+	{
+		// Reported since the last summary.
+		uint64_t frames = 0;
+		// Feedback arrived but the frame never reached the decoder.
+		uint64_t incomplete = 0;
+		// Of those, ones where some shards did arrive: the frame was torn apart
+		// in flight rather than never sent. That is packet loss specifically.
+		uint64_t partial = 0;
+		uint64_t recoveries_at_last_report = 0;
+
+		int64_t last_report_ns = 0;
+
+		// Held for the debug gui; percentages over the last reporting window.
+		float loss_pct = 0;
+		float partial_pct = 0;
+		uint64_t recoveries_total = 0;
+	};
+	link_stats link;
+
+	// Summarise and log the window, at most every few seconds.
+	void report_link_stats();
+
 	const u_logging_level log_level;
 	timings squasher_times;
 	timings foveation_times;

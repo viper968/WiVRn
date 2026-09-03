@@ -21,6 +21,8 @@
 
 #include "compositor.h"
 
+#include <cinttypes>
+
 // Monado includes
 #include "driver/xrt_cast.h"
 #include "main/comp_frame.h"
@@ -755,6 +757,9 @@ compositor::compositor(wivrn_session & session) :
 	u_var_add_root(this, "Compositor", false);
 	u_var_add_f32_timing(this, &squasher_times.var, "layers processing");
 	u_var_add_f32_timing(this, &foveation_times.var, "foveation");
+	u_var_add_ro_f32(this, &link.loss_pct, "link: frames incomplete (%)");
+	u_var_add_ro_f32(this, &link.partial_pct, "link: lost in flight (%)");
+	u_var_add_ro_u64(this, &link.recoveries_total, "link: IDR recoveries");
 
 	// Start the thread after everything is initialized
 	encoder_thread = std::jthread{[&](std::stop_token t) { encoder_work(t); }};
@@ -836,9 +841,73 @@ void compositor::on_feedback(const from_headset::feedback & feedback, const cloc
 	if (stream >= encoders.size())
 		return;
 	encoders[stream]->on_feedback(feedback);
+
+	// A frame that never reached the decoder is a lost frame. If some of its
+	// shards did arrive, it was lost in flight rather than never sent, which is
+	// the case that points at the network rather than at a skipped frame.
+	++link.frames;
+	if (not feedback.sent_to_decoder)
+	{
+		++link.incomplete;
+		if (feedback.received_first_packet)
+			++link.partial;
+	}
+	report_link_stats();
+
 	if (not o)
 		return;
 	pacer.on_feedback(feedback, o);
+}
+
+void compositor::report_link_stats()
+{
+	static constexpr int64_t report_interval_ns = int64_t{5} * U_TIME_1S_IN_NS;
+
+	auto now = os_monotonic_get_ns();
+	if (link.last_report_ns == 0)
+	{
+		link.last_report_ns = now;
+		return;
+	}
+	if (now - link.last_report_ns < report_interval_ns or link.frames == 0)
+		return;
+
+	uint64_t recoveries = 0;
+	for (const auto & encoder: encoders)
+	{
+		if (encoder)
+			recoveries += encoder->idr_recoveries();
+	}
+	const uint64_t new_recoveries = recoveries - link.recoveries_at_last_report;
+
+	const double seconds = double(now - link.last_report_ns) / U_TIME_1S_IN_NS;
+	link.loss_pct = 100.f * link.incomplete / link.frames;
+	link.partial_pct = 100.f * link.partial / link.frames;
+	link.recoveries_total = recoveries;
+
+	// Only worth a line when something actually went wrong; otherwise it is
+	// noise on every healthy session.
+	if (link.incomplete or new_recoveries)
+	{
+		U_LOG_I("link: %.2f%% of frames incomplete (%" PRIu64 "/%" PRIu64 "), "
+		        "%.2f%% lost in flight, %" PRIu64 " IDR recoveries over %.1fs",
+		        link.loss_pct,
+		        link.incomplete,
+		        link.frames,
+		        link.partial_pct,
+		        new_recoveries,
+		        seconds);
+	}
+	else
+	{
+		U_LOG_IFL_D(log_level, "link: %" PRIu64 " frames, no loss over %.1fs", link.frames, seconds);
+	}
+
+	link.frames = 0;
+	link.incomplete = 0;
+	link.partial = 0;
+	link.recoveries_at_last_report = recoveries;
+	link.last_report_ns = now;
 }
 
 } // namespace wivrn

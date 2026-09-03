@@ -20,6 +20,7 @@
 
 #include "wivrn_packets.h"
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <variant>
@@ -29,11 +30,23 @@ namespace wivrn
 
 class idr_handler
 {
+protected:
+	// Times a lost frame has forced a keyframe. Every recovery costs at least a
+	// round trip of skipped frames plus the keyframe's bitrate spike, so the
+	// count is the cheapest available measure of how much a lossy link is
+	// actually hurting.
+	std::atomic_uint64_t recoveries_{0};
+
 public:
 	virtual ~idr_handler();
 	virtual void on_feedback(const from_headset::feedback &) = 0;
 	virtual void reset() = 0;
 	virtual bool should_skip(uint64_t frame_id) = 0;
+
+	uint64_t recoveries() const
+	{
+		return recoveries_;
+	}
 };
 
 // handler for unknown P-frames

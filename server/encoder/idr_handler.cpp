@@ -42,6 +42,7 @@ void default_idr_handler::on_feedback(const from_headset::feedback & f)
 			                   else
 			                   {
 				                   U_LOG_W("IDR frame dropped, stream %d", f.stream_index);
+				                   ++recoveries_;
 				                   state = need_idr{};
 			                   }
 		                   }
@@ -50,6 +51,7 @@ void default_idr_handler::on_feedback(const from_headset::feedback & f)
 		                   if (not f.sent_to_decoder and f.frame_index >= r.first_p and not is_non_ref_frame(f.frame_index))
 		                   {
 			                   U_LOG_I("IDR frame needed on stream %d", f.stream_index);
+			                   ++recoveries_;
 			                   state = need_idr{};
 		                   }
 	                   },
