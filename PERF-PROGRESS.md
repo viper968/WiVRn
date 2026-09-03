@@ -13,6 +13,7 @@ Baseline: **`SendData` mean 0.194 ms**, n=46,146 (nvenc h265, ~50 Mbit/s, 90 Hz,
 | 3 | E6 DSCP never applied | `8c725dc0` | **confirmed on the wire: `tos 0xb8`** |
 | 4 | E1 batch shard sends | `f9a9314a` + `0d6c6e0a` | **SendData −6% at matched load** |
 | 5 | E3/E4 client-side | not started | bounded at 3.69% client CPU, unattributed |
+| 6 | F6 loss + IDR telemetry (server) | `d162a460` | **3% packet loss = ~25% of frames + ~20 IDR/s** |
 
 ## Corrections to the original review
 
@@ -51,6 +52,23 @@ The review was written without the ability to build or measure. Three claims did
   including the shell running `pkill`, which then dies mid-cleanup and leaves the server
   alive. Use `pkill -x wivrn-server`. Likewise `pgrep -a wivrn wayvr` takes only one pattern
   and silently errors, so it reports "nothing running" regardless.
+
+## What F6 revealed
+
+Injecting 3% packet loss with netem, against a Quest 3S:
+
+```
+healthy    link: 1440 frames, no loss over 5.0s
+3% loss    link: 26.36% of frames incomplete (364/1381),
+                 26.36% lost in flight, 110 IDR recoveries over 5.0s
+restored   link: 1494 frames, no loss over 5.0s
+```
+
+3% packet loss costs **~25% of frames** and **~20 forced keyframes per second**. That is the
+cost of the current any-loss-means-IDR policy, now measurable — and the strongest argument yet
+for F4 (FEC or reference-picture selection). It is also the instrument F1 would be tuned with.
+
+The in-headset half of F6 still needs a client build.
 
 ## Rules
 
