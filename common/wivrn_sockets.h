@@ -100,8 +100,18 @@ class UDP : public fd_base
 
 	crypto::decrypt_context decrypter;
 	static thread_local crypto::encrypt_context encrypter;
+	// Key currently loaded in the thread_local encrypter, so that sending can
+	// re-install it only when it actually changes. The encrypter is shared by
+	// every UDP instance in the thread, so unlike the decrypter it cannot simply
+	// be keyed once at handshake.
+	static thread_local std::array<uint8_t, 16> encrypter_key;
+	static thread_local bool encrypter_key_loaded;
 	static std::atomic<uint64_t> iv_counter;
 	static_assert(sizeof(iv_counter) == 8);
+
+	// Point the thread_local encrypter at this socket's key and the given
+	// per-datagram IV, skipping the key schedule when the key is already loaded.
+	void load_encrypter(std::span<uint8_t, 16> full_iv);
 
 	bool encrypted = false;
 	std::array<uint8_t, 16> key;

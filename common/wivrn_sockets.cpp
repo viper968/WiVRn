@@ -36,7 +36,25 @@
 #include <unistd.h>
 
 thread_local crypto::encrypt_context wivrn::UDP::encrypter{EVP_aes_128_ctr()};
+thread_local std::array<uint8_t, 16> wivrn::UDP::encrypter_key{};
+thread_local bool wivrn::UDP::encrypter_key_loaded = false;
 std::atomic<uint64_t> wivrn::UDP::iv_counter;
+
+void wivrn::UDP::load_encrypter(std::span<uint8_t, 16> full_iv)
+{
+	if (encrypter_key_loaded and std::ranges::equal(encrypter_key, key))
+	{
+		// Same key as the last datagram sent from this thread: setting only the
+		// IV resets the CTR counter without redoing the key schedule. This is
+		// what the receive path has always done.
+		encrypter.set_iv(full_iv);
+		return;
+	}
+
+	encrypter.set_key_and_iv(key, full_iv);
+	encrypter_key = key;
+	encrypter_key_loaded = true;
+}
 
 const char * wivrn::invalid_packet::what() const noexcept
 {
@@ -384,7 +402,7 @@ size_t wivrn::UDP::send_raw(serialization_packet && packet)
 
 		iovecs.emplace_back(&counter, sizeof(uint64_t));
 
-		encrypter.set_key_and_iv(key, full_iv);
+		load_encrypter(full_iv);
 		encrypter.encrypt_in_place(data);
 	}
 
@@ -426,7 +444,7 @@ size_t wivrn::UDP::send_many_raw(std::span<serialization_packet> packets)
 
 			iovecs.emplace_back(&iv_counters.back(), sizeof(uint64_t));
 
-			encrypter.set_key_and_iv(key, full_iv);
+			load_encrypter(full_iv);
 			encrypter.encrypt_in_place(data);
 		}
 
