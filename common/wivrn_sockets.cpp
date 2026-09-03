@@ -165,11 +165,15 @@ void wivrn::UDP::set_send_buffer_size(int size)
 
 void wivrn::UDP::set_tos(int tos)
 {
-	int err = setsockopt(fd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
-	if (err == -1)
-	{
-		throw std::system_error{errno, std::generic_category()};
-	}
+	// The socket is created AF_INET6 but usually carries v4-mapped traffic.
+	// IP_TOS covers the v4-mapped case, IPV6_TCLASS the native v6 one; set both
+	// and keep whichever the kernel applies.
+	//
+	// Best effort by design: marking is only a scheduling hint to the access
+	// point, so an interface or kernel that refuses it must fall back to
+	// unmarked traffic rather than take the connection down.
+	setsockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, &tos, sizeof(tos));
+	setsockopt(fd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
 }
 
 void wivrn::TCP::init()

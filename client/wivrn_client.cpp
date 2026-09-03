@@ -37,11 +37,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#ifndef IPTOS_DSCP_EF
-// constant is not defined in Android ip.h
-#define IPTOS_DSCP_EF 0xb8
-#endif
-
 using namespace std::chrono_literals;
 
 const char * handshake_error::what() const noexcept
@@ -58,6 +53,7 @@ template <typename T>
 void init_stream(T & stream)
 {
 	stream.set_receive_buffer_size(1024 * 1024 * 5);
+	stream.set_tos(wivrn::dscp_expedited_forwarding);
 }
 } // namespace
 

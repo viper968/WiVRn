@@ -93,6 +93,13 @@ public:
 	}
 };
 
+// DSCP Expedited Forwarding, as a TOS / traffic-class byte. Access points map
+// this to the WMM voice access category, which is where latency-sensitive video
+// wants to be rather than sharing best-effort with everything else on the
+// network. Spelled out rather than using IPTOS_DSCP_EF, which Android's
+// <netinet/ip.h> does not define.
+inline constexpr int dscp_expedited_forwarding = 0xb8;
+
 class UDP : public fd_base
 {
 	std::shared_ptr<uint8_t[]> buffer;

@@ -262,6 +262,9 @@ void wivrn::wivrn_connection::init(std::stop_token stop_token, std::function<voi
 	{
 		stream.connect(client_address.sin6_addr, client_port);
 		stream.set_send_buffer_size(1024 * 1024 * 5);
+		// This is the direction that carries the video, so this is the direction
+		// where the access point's queueing decision matters.
+		stream.set_tos(dscp_expedited_forwarding);
 	}
 	else
 	{
